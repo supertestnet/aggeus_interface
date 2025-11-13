@@ -14,31 +14,6 @@
         <script src="file:///home/supertestnet/bitcoin_projects/testnet_generator/noble-secp256k1@1.2.14"></script>
         <script>
             var mempool_client = async ( network, command, params ) => {
-                var convertNEvent = nevent => {
-                    var arr = bech32.bech32.fromWords( bech32.bech32.decode( nevent, 100_000 ).words );
-                    var hex = super_nostr.bytesToHex( arr );
-                    if ( !hex.startsWith( "0020" ) ) var event_id = hex.substring( hex.length - 64 );
-                    else var event_id = hex.substring( 4, 68 );
-                    if ( !hex.startsWith( "0020" ) ) hex = hex.substring( 0, hex.length - 64 );
-                    else hex = hex.substring( 68 );
-                    var relays = [];
-                    var loop = () => {
-                        if ( hex.startsWith( "01" ) ) {
-                            var relay_length = parseInt( hex.substring( 2, 4 ), 16 );
-                            relays.push( hexToText( hex.substring( 4, 4 + relay_length * 2 ) ) );
-                            hex = hex.substring( 4 + relay_length * 2 );
-                            loop();
-                        }
-                    }
-                    loop();
-                    return [ event_id, relays ];
-                }
-                var hexToText = hex => {
-                    var bytes = new Uint8Array( Math.ceil( hex.length / 2 ) );
-                    var i; for ( i=0; i<hex.length; i++ ) bytes[ i ] = parseInt( hex.substr( i * 2, 2 ), 16 );
-                    var text = new TextDecoder().decode( bytes );
-                    return text;
-                }
                 if ( typeof network === "object" ) {
                     var [ miner, relay ] = network;
                     var commander = async ( command, params ) => {
@@ -151,6 +126,9 @@
             <h1>Welcome to Aggeus</h1>
             <div class="markets_on_display"></div>
         </div>
+        <div class="top_level_page loading_page hidden">
+            <p>loading...</p>
+        </div>
         <div class="top_level_page market_page hidden">
             <h1 class="market_name">Market page</h1>
             <div class="yes_or_no_box yes_box">
@@ -186,6 +164,10 @@
             var privkey = super_nostr.getPrivkey();
             if ( $_HASH.network ) var network = $_HASH.network;
             else var network = null;
+            var coordinators_privkey = "3bda6a1ea0c75a2d07a6475e8e91f08d3e551f629c17213dd732fb96c53b41a5";
+            var coordinators_pubkey = super_nostr.getPubkey( coordinators_privkey );
+            // var coordinators_relays = [ "wss://no.str.cr" ];
+            var coordinators_relays = [ "ws://127.0.0.1:6969/" ];
             var markets = [
                 "WzAsIldpbGwgdGhlIFJlcHVibGljYW4gYmVhdCB0aGUgRGVtb2NyYXQ/IiwiMzk4ZjBiM2E5NWM1YTNkOTUyMTgyZDZkNDBjYjRmYzNmMWIyMGZhYzRhYjE4N2UzNDg3M2RjYTVmYzNhYzFjMyIsImRhOGU2MTc2YzI0MTg1NGUzNmIzYzIzYzA5YWY0OGQyMmJjNjI4MjFiZTk3MWM1YTI5YjA0NzIwN2QzOTI5YmYiLCIyZjRkYTVkMWM1ZmJhNTJhOWM2OWRjNmUzZjE2NGFmOThiOWVjYTk5MDA0NzQ4NjRmMjk5MmRmNWJhYzc1ZTEzIiwxMCwiYjE3YmUwZjU2NmYxODQ3ZWUyOGM4OWZhM2VhNjhiNDI1ZGUyODM2ODc1MDc3NDAzZWRjOTE0NmMyYzkzMzU1YiIsIjI3YTE2ZWI4OTY2Y2MwYjJlNWU0ODZlYzQ1ZTZjY2ZlMzRkMGNiMGNiMzA0YWVlZDU5MTAyNDhmYWJlM2Q3MjciLFsid3NzOi8vbm9zdHIuYml0Y29pbmVyLnNvY2lhbCJdXQ==",
                 "WzAsIldpbGwgYmlwNDQ0IGFjdGl2YXRlPyIsIjNlODU0ZTFmMWQ1OWM3M2UzMGM5ZDFmZTdmNDI2MDBlODY1Zjc1NjI5Y2I1MjIxOGIxZWQxODQ3NDU0N2YwZDAiLCJlNmNjN2RkZDQzMzZmZDQzMjkyNjNjMTA0NzYxNDg0YmI3NWMxMjQ3NDkyZGE2M2Y0MzI5YjMxMmEwY2ViNmIzIiwiMmY0ZGE1ZDFjNWZiYTUyYTljNjlkYzZlM2YxNjRhZjk4YjllY2E5OTAwNDc0ODY0ZjI5OTJkZjViYWM3NWUxMyIsMTAsIjE2MmE3ZGU5MTEzOTczYzU2ZTIxNTZhNDQ3M2E3YjMzMjZmODNiZDU4ODZhOGJhYWVhZGFlOTA2MmZlNDY1MmQiLCIxY2JhN2UwMWRjZjU3MmFjNjFjZjg5ZmNhY2QxNThjNDc1MTBmNzI5NjQ3M2JkMWRiODY0OTkwODk1OGM3OTUyIixbIndzczovL25vc3RyLmJpdGNvaW5lci5zb2NpYWwiXV0="
@@ -195,6 +177,43 @@
             var displayMarket = async shareable_data => {
                 var market_data = JSON.parse( atob( shareable_data ) );
                 var market_id = market_data[ 2 ];
+
+                //Get all matching offers from the coordinator
+                showPage( 'loading_page' );
+                var c_talker = async ( miner, relay, command, params ) => {
+                    var privkey = super_nostr.getPrivkey();
+                    var pubkey = super_nostr.getPubkey( privkey );
+                    var msg = JSON.stringify({msg_type: command, msg_value: params});
+                    var emsg = await super_nostr.alt_encrypt( privkey, miner, msg );
+                    var event = await super_nostr.prepEvent( privkey, emsg, 4, [ [ "p", miner ] ] );
+                    super_nostr.sendEvent( event, relay );
+                    var num_of_loops = 0;
+                    var loop = async () => {
+                        num_of_loops = num_of_loops + 1;
+                        if ( num_of_loops > 3 ) return 'no_coordinator';
+                        await super_nostr.waitSomeSeconds( 1 );
+                        var ids = null;
+                        var authors = [ miner ];
+                        var kinds = [ 4 ];
+                        var until = null;
+                        var since = null;
+                        var limit = 1;
+                        var etags = null;
+                        var ptags = [ pubkey ];
+                        var events = await super_nostr.getEvents( relay, ids, authors, kinds, until, since, limit, etags, ptags );
+                        if ( !events.length ) return loop();
+                        var event = events[ 0 ];
+                        var recipient = event.pubkey;
+                        var content = await super_nostr.alt_decrypt( privkey, recipient, event.content );
+                        var json = JSON.parse( content );
+                        return json.msg_value;
+                    }
+                    var reply = await loop();
+                    return reply;
+                }
+                var reply = await c_talker( coordinators_pubkey, coordinators_relays[ 0 ], "ping" );
+                if ( reply === "no_coordinator" ) return alert( `this market has no coordinator, try again` );
+
                 var yes_privkey = await super_nostr.sha256( `y${privkey}${market_id}0` );
                 var no_privkey = await super_nostr.sha256( `n${privkey}${market_id}0` );
                 var yes_pubkey = super_nostr.getPubkey( yes_privkey );
@@ -205,6 +224,7 @@
                 $( '.no_qr_code' ).innerText = no_address;
                 showPage( 'market_page' );
                 var listenForCoins = async network => {
+                    console.log( `waiting for user's deposit...` );
                     await super_nostr.waitSomeSeconds( 1 );
                     if ( !network ) network = prompt( "enter network, either in the form pubkey,wss://relay.example.com or a url such as https://mempool.guide/api" );
                     if ( network.includes( "," ) ) network = network.split( "," );
@@ -214,11 +234,88 @@
                     return { yes_utxos, no_utxos }
                 }
                 var utxos = await listenForCoins( network );
+                console.log( 'utxos:' );
+                console.log( utxos );
                 var yes_balance = 0;
+                utxos.yes_utxos.forEach( utxo => {
+                    yes_balance = yes_balance + utxo.value;
+                });
+                var no_balance = 0;
+                utxos.no_utxos.forEach( utxo => {
+                    no_balance = no_balance + utxo.value;
+                });
+
+                //Check if any offers match what the user is looking for. For example, if the user deposited into Yes when the odds are currently 60/40, they should expect to pay 6000 sats, and seek offers where they pay 6200 sats or less, i.e. offers with odds of 62/38, 61/39, 60/40, etc. And if the user deposited into No in such a case, they should expect to pay 4200 sats, and seek offers where the yes_better offers odds of 58/42, 59/41, 60/40, etc.
+                var matching_offers = {buying_yes: [], buying_no: []};
+                var remaining_yes_balance = yes_balance;
+                var remaining_no_balance = no_balance;
+                if ( yes_balance ) {
+                    var all_offers = await c_talker( coordinators_pubkey, coordinators_relays[ 0 ], "get_offers", { market_id, type: "for_sale_by_no_better", max_price: ( 60 * 100 ) + ( 2 * 100 ) });
+                    all_offers.forEach( offer => {
+                        if ( offer[ 1 ] > remaining_yes_balance ) return;
+                        matching_offers[ "buying_yes" ].push( offer );
+                        remaining_yes_balance = remaining_yes_balance - offer[ 1 ];
+                    });
+                }
+                if ( no_balance ) {
+                    var all_offers = await c_talker( coordinators_pubkey, coordinators_relays[ 0 ], "get_offers", { market_id, type: "for_sale_by_yes_better", max_price: ( 40 * 100 ) + ( 2 * 100 ) } );
+                    all_offers.forEach( offer => {
+                        if ( offer[ 1 ] > remaining_no_balance ) return;
+                        matching_offers[ "buying_no" ].push( offer );
+                        remaining_no_balance = remaining_no_balance - offer[ 1 ];
+                    });
+                }
+
+                //Create a PSBT to buy the matching offers -- note that the new user was told what outputs the original depositor wanted so that he (the new user) can create his psbt in such a way that his input(s) get(s) consumed in a single transaction that simultaneously funds all the offers desired by the original depositor -- and if he has any change, this tx simultaneously creates outputs controlled by the new user, but which the proxy is authorized to convert into contracts later -- but I forgot to do this in such a way that the user is sure to get the 10k sat outputs *he* wants
+                var match_vin = [];
+                var match_vout = [];
+                matching_offers.buying_yes.forEach( offer => {
+                    var tx = tapscript.Tx.decode( offer[ 2 ] );
+                    var new_vin = tx.vin[ 0 ];
+                    new_vin.prevout = {
+                        value: 10_000 - ( ( 60 * 100 ) - ( 2 * 100 ) ),
+                        scriptPubKey: [ 1, "a".repeat( 64 ) ],
+                    }
+                    match_vin.push( new_vin );
+                    match_vout.push( tx.vout[ 0 ] );
+                });
+                matching_offers.buying_no.forEach( offer => {
+                    var tx = tapscript.Tx.decode( offer[ 2 ] );
+                    var new_vin = tx.vin[ 0 ];
+                    new_vin.prevout = {
+                        value: 10_000 - ( ( 40 * 100 ) - ( 2 * 100 ) ),
+                        scriptPubKey: [ 1, "a".repeat( 64 ) ],
+                    }
+                    match_vin.push( new_vin );
+                    match_vout.push( tx.vout[ 0 ] );
+                });
+                utxos.yes_utxos.forEach( utxo => {
+                    match_vin.push({
+                        txid: utxo.txid,
+                        vout: utxo.vout,
+                        witness: [],
+                        prevout: {
+                            value: utxo.value,
+                            scriptPubKey: tapscript.Address.toScriptPubKey( yes_address ),
+                        },
+                    });
+                });
+                utxos.no_utxos.forEach( utxo => {
+                    match_vin.push({
+                        txid: utxo.txid,
+                        vout: utxo.vout,
+                        witness: [],
+                        prevout: {
+                            value: utxo.value,
+                            scriptPubKey: tapscript.Address.toScriptPubKey( no_address ),
+                        },
+                    });
+                });
+
+                //Divide up the remaining Yes balance into utxos each worth 10k sats - ( current_percentage * 100 )
                 var yes_inputs = [];
                 var yes_outputs = [];
                 utxos.yes_utxos.forEach( utxo => {
-                    yes_balance = yes_balance + utxo.value;
                     yes_inputs.push({
                         txid: utxo.txid,
                         vout: utxo.vout,
@@ -229,36 +326,57 @@
                         },
                     });
                 });
-                var num_of_yes_outputs_to_make = Math.floor( yes_balance / 10_000 );
-                var yes_change = yes_balance % 10_000;
+                var num_of_yes_outputs_to_make = Math.floor( remaining_yes_balance / ( 10_000 - ( ( 40 * 100 ) - ( 2 * 100 ) ) ) );
+                var yes_change = remaining_yes_balance % ( 10_000 - ( ( 40 * 100 ) - ( 2 * 100 ) ) );
                 var i; for ( i=0; i<num_of_yes_outputs_to_make; i++ ) {
-                    yes_outputs.push({
-                        value: 10_000,
-                        scriptPubKey: tapscript.Address.toScriptPubKey( yes_address ),
-                    });
-                    //"tb1pgkykn7dqs4umtr3ggej3dekz2fa7ecjm8tzcns3fq6y508uf7dvsvhnswg"
+                    if ( matching_offers.buying_yes.length ) {
+                        match_vout.push({
+                            value: ( 10_000 - ( ( 40 * 100 ) - ( 2 * 100 ) ) ),
+                            scriptPubKey: tapscript.Address.toScriptPubKey( yes_address ),
+                        });
+                    } else {
+                        yes_outputs.push({
+                            value: ( 10_000 - ( ( 40 * 100 ) - ( 2 * 100 ) ) ),
+                            scriptPubKey: tapscript.Address.toScriptPubKey( yes_address ),
+                        });
+                    }
                 }
                 if ( yes_change >= 330 ) {
-                    yes_outputs.push({
-                        value: yes_change,
-                        scriptPubKey: tapscript.Address.toScriptPubKey( yes_address ),
-                    });
+                    if ( matching_offers.buying_yes.length ) {
+                        match_vout.push({
+                            value: yes_change,
+                            scriptPubKey: tapscript.Address.toScriptPubKey( yes_address ),
+                        });
+                    } else {
+                        yes_outputs.push({
+                            value: yes_change,
+                            scriptPubKey: tapscript.Address.toScriptPubKey( yes_address ),
+                        });
+                    }
                 }
-                var yes_psbt = tapscript.Tx.create({
+                var yes_psbt = {
                     vin: yes_inputs,
                     vout: yes_outputs,
-                });
+                }
                 var i; for ( i=0; i<yes_psbt.vin.length; i++ ) {
-                    var sig = tapscript.Signer.taproot.sign( yes_privkey, yes_psbt, i ).hex;
+                    var sig = "0".repeat( 128 );
                     yes_psbt.vin[ i ].witness = [ sig ];
+                }
+                if ( matching_offers.buying_yes.length ) {
+                    yes_psbt = {
+                        vin: match_vin,
+                        vout: match_vout,
+                    }
+                    var i; for ( i=matching_offers.buying_yes.length; i<yes_psbt.vin.length; i++ ) {
+                        var sig = "0".repeat( 128 );
+                        yes_psbt.vin[ i ].witness = [ sig ];
+                    }
                 }
 
                 //Do the same thing for No that you just did for Yes
-                var no_balance = 0;
                 var no_inputs = [];
                 var no_outputs = [];
                 utxos.no_utxos.forEach( utxo => {
-                    no_balance = no_balance + utxo.value;
                     no_inputs.push({
                         txid: utxo.txid,
                         vout: utxo.vout,
@@ -269,20 +387,33 @@
                         },
                     });
                 });
-                var num_of_no_outputs_to_make = Math.floor( no_balance / 10_000 );
-                var no_change = no_balance % 10_000;
+                var num_of_no_outputs_to_make = Math.floor( remaining_no_balance / ( 10_000 - ( ( 60 * 100 ) - ( 2 * 100 ) ) ) );
+                var no_change = remaining_no_balance % ( 10_000 - ( ( 60 * 100 ) - ( 2 * 100 ) ) );
                 var i; for ( i=0; i<num_of_no_outputs_to_make; i++ ) {
-                    no_outputs.push({
-                        value: 10_000,
-                        scriptPubKey: tapscript.Address.toScriptPubKey( no_address ),
-                        //"tb1ppywlyhjxh35jxt3u47jdhj4gm55ewq654qr5qj8wtjfzjx9cjd0qurfgum"
-                    });
+                    if ( matching_offers.buying_no.length ) {
+                        match_vout.push({
+                            value: ( 10_000 - ( ( 60 * 100 ) - ( 2 * 100 ) ) ),
+                            scriptPubKey: tapscript.Address.toScriptPubKey( no_address ),
+                        });
+                    } else {
+                        no_outputs.push({
+                            value: ( 10_000 - ( ( 60 * 100 ) - ( 2 * 100 ) ) ),
+                            scriptPubKey: tapscript.Address.toScriptPubKey( no_address ),
+                        });
+                    }
                 }
                 if ( no_change >= 330 ) {
-                    no_outputs.push({
-                        value: no_change,
-                        scriptPubKey: tapscript.Address.toScriptPubKey( no_address ),
-                    });
+                    if ( matching_offers.buying_no.length ) {
+                        match_vout.push({
+                            value: no_change,
+                            scriptPubKey: tapscript.Address.toScriptPubKey( no_address ),
+                        });
+                    } else {
+                        no_outputs.push({
+                            value: no_change,
+                            scriptPubKey: tapscript.Address.toScriptPubKey( no_address ),
+                        });
+                    }
                 }
                 var no_psbt = {
                     vin: no_inputs,
@@ -291,6 +422,16 @@
                 var i; for ( i=0; i<no_psbt.vin.length; i++ ) {
                     var sig = "0".repeat( 128 );
                     no_psbt.vin[ i ].witness = [ sig ];
+                }
+                if ( matching_offers.buying_no.length ) {
+                    no_psbt = {
+                        vin: match_vin,
+                        vout: match_vout,
+                    }
+                    var i; for ( i=matching_offers.buying_no.length; i<no_psbt.vin.length; i++ ) {
+                        var sig = "0".repeat( 128 );
+                        no_psbt.vin[ i ].witness = [ sig ];
+                    }
                 }
                 var subtractFeesFromOutputs = ( psbt, feerate ) => {
                     if ( !psbt.vout.length ) return 'error';
@@ -301,41 +442,73 @@
                     psbt.vin.forEach( input => sum_of_inputs = sum_of_inputs + Number( input.prevout.value ) );
                     psbt.vout.forEach( output => sum_of_outputs = sum_of_outputs + Number( output.value ) );
                     var fee_so_far = sum_of_inputs - sum_of_outputs;
-                    if ( fee_so_far >= fee_needed && fee_so_far - fee_needed >= 330 ) return 'error';
+                    if ( fee_so_far >= fee_needed && fee_so_far - fee_needed >= 330 ) {
+                        console.log( 'fee so far:', fee_so_far );
+                        console.log( 'fee_needed:', fee_needed );
+                        console.log( 'sats you will lose if you proceed:', fee_so_far - fee_needed );
+                        return 'error';
+                    }
                     else if ( fee_so_far >= fee_needed ) return psbt;
                     var remaining_fee_needed = fee_needed - fee_so_far;
-                    var fake_psbt = JSON.parse( JSON.stringify( psbt ) );
-                    if ( fake_psbt.vout[ fake_psbt.vout.length - 1 ].value > remaining_fee_needed + 330 ) {
-                        fake_psbt.vout[ fake_psbt.vout.length - 1 ].value = fake_psbt.vout[ fake_psbt.vout.length - 1 ].value - remaining_fee_needed;
-                        return fake_psbt;
+                    psbt.vout.forEach( ( vout, index ) => psbt.vout[ index ].value = Number( vout.value ) );
+                    var temp_psbt = JSON.parse( JSON.stringify( psbt ) );
+                    if ( temp_psbt.vout[ temp_psbt.vout.length - 1 ].value > remaining_fee_needed + 330 ) {
+                        temp_psbt.vout[ temp_psbt.vout.length - 1 ].value = temp_psbt.vout[ temp_psbt.vout.length - 1 ].value - remaining_fee_needed;
+                        return temp_psbt;
                     } else {
-                        fake_psbt.vout.splice( fake_psbt.vout.length - 1, 1 );
-                        return subtractFeesFromOutputs( fake_psbt, feerate );
+                        temp_psbt.vout.splice( temp_psbt.vout.length - 1, 1 );
+                        return subtractFeesFromOutputs( temp_psbt, feerate );
                     }
                 }
                 //TODO: get feerate from the blockchain
                 var feerate = 1;
                 var yes_psbt_minus_fees = yes_psbt;
-                if ( yes_psbt.vin.length ) yes_psbt_minus_fees = subtractFeesFromOutputs( yes_psbt, feerate );
+                if ( yes_psbt.vin.length && !matching_offers.buying_yes.length ) yes_psbt_minus_fees = subtractFeesFromOutputs( yes_psbt, feerate );
                 var no_psbt_minus_fees = no_psbt;
-                if ( no_psbt.vin.length ) no_psbt_minus_fees = subtractFeesFromOutputs( no_psbt, feerate );
+                if ( no_psbt.vin.length && !matching_offers.buying_no.length ) no_psbt_minus_fees = subtractFeesFromOutputs( no_psbt, feerate );
+
+                //if necessary, add 10k sat outputs that funds a smart contract between the coordinator and the new user, and which the coordinator must supply inputs for
+                if ( !matching_offers.buying_yes.length && !matching_offers.buying_no.length ) var vins_to_skip = 0;
+                else vins_to_skip = matching_offers.buying_yes.length + matching_offers.buying_no.length;
+                if ( vins_to_skip ) {
+                    var i; for ( i=0; i<vins_to_skip; i++ ) {
+                        if ( !yes_psbt_minus_fees.vout.length ) continue;
+                        yes_psbt_minus_fees.vout.push({
+                            value: 10_000,
+                            scriptPubKey: tapscript.Address.toScriptPubKey( 'tb1pr60dhp5hwpyeas00zfsczpgnmsddn49fj3wnlnzug37sk2w0r0kq5w7847' ),
+                        });
+                    }
+                    var i; for ( i=0; i<vins_to_skip; i++ ) {
+                        if ( !no_psbt_minus_fees.vout.length ) continue;
+                        no_psbt_minus_fees.vout.push({
+                            value: 10_000,
+                            scriptPubKey: tapscript.Address.toScriptPubKey( 'tb1pr60dhp5hwpyeas00zfsczpgnmsddn49fj3wnlnzug37sk2w0r0kq5w7847' ),
+                        });
+                    }
+                    var offer_id = super_nostr.getPrivkey().substring( 0, 16 );
+                }
 
                 //sign the modified transactions
-                var i; for ( i=0; i<yes_psbt_minus_fees.vin.length; i++ ) {
+                var i; for ( i=vins_to_skip; i<yes_psbt_minus_fees.vin.length; i++ ) {
                     var sig = tapscript.Signer.taproot.sign( yes_privkey, yes_psbt_minus_fees, i ).hex;
+                    if ( vins_to_skip ) var sig = tapscript.Signer.taproot.sign( yes_privkey, yes_psbt_minus_fees, i, {sigflag: 1 | 128} ).hex;
                     yes_psbt_minus_fees.vin[ i ].witness = [ sig ];
                 }
-                var i; for ( i=0; i<no_psbt_minus_fees.vin.length; i++ ) {
+                var i; for ( i=vins_to_skip; i<no_psbt_minus_fees.vin.length; i++ ) {
                     var sig = tapscript.Signer.taproot.sign( no_privkey, no_psbt_minus_fees, i ).hex;
+                    //TODO: add a 10k sat output for each of these that funds a smart contract between the coordinator and the new user, and which the coordinator must supply inputs for
+                    if ( vins_to_skip ) var sig = tapscript.Signer.taproot.sign( no_privkey, no_psbt_minus_fees, i, {sigflag: 1 | 128} ).hex;
                     no_psbt_minus_fees.vin[ i ].witness = [ sig ];
                 }
 
-                //For each 10k sat output in the above psbts, sign a tx that lets the coordinator turn them into offers
+                //For each of the user's outputs created by the above psbts, sign a tx that lets the coordinator turn them into offers
                 var yes_psbt_txid = tapscript.Tx.util.getTxid( yes_psbt_minus_fees );
                 var new_yes_psbts = [];
-                var i; for ( i=0; i<yes_psbt_minus_fees.vout.length; i++ ) {
+                var num_of_yes_outputs_to_turn_info_offers = yes_psbt_minus_fees.vout.length;
+                var i; for ( i=vins_to_skip; i<num_of_yes_outputs_to_turn_info_offers; i++ ) {
                     var vout = yes_psbt_minus_fees.vout[ i ];
-                    if ( vout.value !== 10_000 ) continue;
+                    vout.value = Number( vout.value );
+                    if ( vout.value !== ( 10_000 - ( ( 40 * 100 ) - ( 2 * 100 ) ) ) ) continue;
                     var new_psbt = {
                         vin: [{
                             txid: yes_psbt_txid,
@@ -352,9 +525,11 @@
                 }
                 var no_psbt_txid = tapscript.Tx.util.getTxid( no_psbt_minus_fees );
                 var new_no_psbts = [];
-                var i; for ( i=0; i<no_psbt_minus_fees.vout.length; i++ ) {
+                var num_of_no_outputs_to_turn_info_offers = no_psbt_minus_fees.vout.length;
+                var i; for ( i=vins_to_skip; i<num_of_no_outputs_to_turn_info_offers; i++ ) {
                     var vout = no_psbt_minus_fees.vout[ i ];
-                    if ( vout.value !== 10_000 ) continue;
+                    vout.value = Number( vout.value );
+                    if ( vout.value !== ( 10_000 - ( ( 60 * 100 ) - ( 2 * 100 ) ) ) ) continue;
                     var new_psbt = {
                         vin: [{
                             txid: no_psbt_txid,
@@ -380,84 +555,64 @@
                     new_no_psbts[ i ].vin[ 0 ].witness = [ sig ];
                 }
 
-                //Tell the user what you've done
-                console.log( 'yes psbt:' );
-                console.log( tapscript.Tx.encode( yes_psbt_minus_fees ).hex );
-                console.log( 'current outcome percentages:' );
-                console.log( [ 62, 38 ] );
-                console.log( 'no psbt:' );
-                console.log( tapscript.Tx.encode( no_psbt_minus_fees ).hex );
-                console.log( 'current outcome percentages:' );
-                console.log( [ 42, 58 ] );
-                console.log( 'now I am pretending to share my offers with the coordinator' );
+                //Tell the coordinator about the matching offers and give him your psbt
+                if ( yes_psbt_minus_fees.vout.length ) var tx_to_work_with = yes_psbt_minus_fees;
+                else var tx_to_work_with = no_psbt_minus_fees;
+                tx_to_work_with.vin.forEach( ( vin, index ) => tx_to_work_with.vin[ index ].prevout.value = Number( vin.prevout.value ) );
+                tx_to_work_with.vout.forEach( ( vout, index ) => tx_to_work_with.vout[ index ].value = Number( vout.value ) );
+                var offer_ids = [];
+                matching_offers.buying_yes.forEach( ( yes_offer, index ) => {
+                    offer_ids.push( yes_offer[ 0 ].split( "_" )[ 1 ] );
+                });
+                matching_offers.buying_no.forEach( ( no_offer, index ) => {
+                    offer_ids.push( no_offer[ 0 ].split( "_" )[ 1 ] );
+                });
+                if ( vins_to_skip ) var funding_txid = await c_talker( coordinators_pubkey, coordinators_relays[ 0 ], "accept_offers", { market_id, offer_ids, psbt: tx_to_work_with });
+
+                //Tell the user what is happening now
+                if ( vins_to_skip ) {
+                    console.log( 'the coordinator broadcasted this tx:' );
+                    console.log( funding_txid );
+                    console.log( 'now I am pretending to share my other offers, if any, with the coordinator' );
+                } else {
+                    console.log( 'now I am broadcasting the funding tx:' );
+                    console.log( tapscript.Tx.encode( tx_to_work_with ).hex );
+                    var txid = await mempool_client( network.split( "," ), "broadcast", tapscript.Tx.encode( tx_to_work_with ).hex );
+                    console.log( 'success!' );
+                    console.log( txid );
+                    console.log( 'now I am pretending to share my offers with the coordinator' );
+                }
                 console.log( `Hi, I'm (pretending to be) the coordinator` );
                 console.log( `Nice offers! I want to list them for sale by putting them in an array` );
                 if ( new_yes_psbts.length ) new_yes_psbts.forEach( psbt => {
+                    psbt = tapscript.Tx.encode( tapscript.Tx.create( psbt ) ).hex;
                     var offer_id = super_nostr.getPrivkey().substring( 0, 16 );
-                    offers[ offer_id ] = { yes_psbt: psbt, no_psbt: null, odds_per_yes_better: [ 62, 38 ], odds_per_no_better: null, yes_better: yes_address, no_better: null };
+                    offers[ `${market_id}_${offer_id}` ] = { offer_id, yes_psbt: psbt, no_psbt: null, odds_per_yes_better: [ 60 + 2, 40 - 2 ], odds_per_no_better: null, yes_better: yes_address, no_better: null, odds_when_yes_better_entered: [ 60 + 2, 40 - 2 ], odds_when_no_better_entered: null, status: "pending", funding_outpoint: null };
                     if ( !betters.hasOwnProperty( yes_address ) ) betters[ yes_address ] = [];
-                    betters[ yes_address ].push( offer_id );
+                    betters[ yes_address ].push( `${market_id}_${offer_id}` );
                 });
                 if ( new_no_psbts.length ) new_no_psbts.forEach( psbt => {
+                    psbt = tapscript.Tx.encode( tapscript.Tx.create( psbt ) ).hex;
                     var offer_id = super_nostr.getPrivkey().substring( 0, 16 );
-                    offers[ offer_id ] = { yes_psbt: null, no_psbt: psbt, odds_per_yes_better: null, odds_per_no_better: [ 58, 42 ], yes_better: null, no_better: no_address };
+                    offers[ `${market_id}_${offer_id}` ] = { offer_id, yes_psbt: null, no_psbt: psbt, odds_per_yes_better: null, odds_per_no_better: [ 60 - 2, 40 + 2 ], yes_better: null, no_better: no_address, odds_when_yes_better_entered: null, odds_when_no_better_entered: [ 60 - 2, 40 + 2 ], status: "pending", funding_outpoint: null };
                     if ( !betters.hasOwnProperty( no_address ) ) betters[ no_address ] = [];
-                    betters[ no_address ].push( offer_id );
+                    betters[ no_address ].push( `${market_id}_${offer_id}` );
+                });
+                matching_offers.buying_yes.forEach( ( yes_offer, index ) => {
+                    var offer_id = yes_offer[ 0 ].split( "_" )[ 1 ];
+                    var funding_vout = tx_to_work_with.vout.length - ( index + 1 );
+                    offers[ `${market_id}_${offer_id}` ] = { offer_id, yes_psbt: null, no_psbt: null, odds_per_yes_better: null, odds_per_no_better: null, yes_better: yes_address, no_better: null, odds_when_yes_better_entered: [ 60 - 2, 40 + 2 ], odds_when_no_better_entered: null, status: "active", funding_outpoint: `${funding_txid}_${funding_vout}` };
+                    betters[ yes_address ].push( `${market_id}_${offer_id}` );
+                });
+                matching_offers.buying_no.forEach( ( no_offer, index ) => {
+                    var offer_id = no_offer[ 0 ].split( "_" )[ 1 ];
+                    var funding_vout = tx_to_work_with.vout.length - ( index + 1 );
+                    offers[ `${market_id}_${offer_id}` ] = { offer_id, yes_psbt: null, no_psbt: null, odds_per_yes_better: null, odds_per_no_better: null, yes_better: null, no_better: no_address, odds_when_yes_better_entered: null, odds_when_no_better_entered: [ 60 + 2, 40 - 2 ], status: "active", funding_outpoint: `${funding_txid}_${funding_vout}` };
+                    betters[ no_address ].push( `${market_id}_${offer_id}` );
                 });
                 console.log( offers, betters );
-                /*
-                    The coordinator needs to keep track of a few things. There are contracts not for sale, contracts for sale by one party, and contracts for sale by both parties. Contracts for sale by one party don't always have a counterparty yet. When a contract is for sale, it can have up to two sellers, such that each one submits the odds they are selling it for and a psbt.
-                */
-                // console.log( `but first I want to ensure I can move those utxos:` );
-                // var movement_tx = tapscript.Tx.create({
-                //     vin: [ new_yes_psbts[ 0 ].vin[ 0 ] ],
-                //     vout: [{
-                //         value: 10_000,
-                //         scriptPubKey: tapscript.Address.toScriptPubKey( "tb1pgkykn7dqs4umtr3ggej3dekz2fa7ecjm8tzcns3fq6y508uf7dvsvhnswg" ),
-                //     },{
-                //         value: 0,
-                //         scriptPubKey: "51024e73",
-                //     }],
-                // });
-                // var movement_txid = tapscript.Tx.util.getTxid( movement_tx );
-                // var fee_payment_privkey = super_nostr.getPrivkey();
-                // var fee_payment_pubkey = super_nostr.getPubkey( fee_payment_privkey );
-                // var fee_payment_address = tapscript.Address.fromScriptPubKey( [ 1, fee_payment_pubkey ], "testnet" );
-                // console.log( 'send 500 sats to this address:' );
-                // console.log( fee_payment_address );
-                // var fee_payment_txid = prompt( `send 500 sats to the address in your console and enter the txid` );
-                // var fee_payment_vout = Number( prompt( `and the vout` ) );
-                // var fee_payment_amnt = Number( prompt( `and the amount` ) );
-                // var fee_payment_tx = tapscript.Tx.create({
-                //     vin: [{
-                //         txid: movement_txid,
-                //         vout: 1,
-                //         prevout: movement_tx.vout[ 1 ],
-                //     },{
-                //         txid: fee_payment_txid,
-                //         vout: fee_payment_vout,
-                //         prevout: {
-                //             value: fee_payment_amnt,
-                //             scriptPubKey: tapscript.Address.toScriptPubKey( fee_payment_address ),
-                //         },
-                //     }],
-                //     vout: [{
-                //         value: 0,
-                //         scriptPubKey: [ "OP_RETURN" ],
-                //     }],
-                // });
-                // var sig = tapscript.Signer.taproot.sign( fee_payment_privkey, fee_payment_tx, 1 );
-                // fee_payment_tx.vin[ 1 ].witness = [ sig ];
-                // var txid1 = await mempool_client( network.split( "," ), "broadcast", tapscript.Tx.encode( yes_psbt_minus_fees ).hex );
-                // console.log( 'txid1:' );
-                // console.log( txid1 );
-                // alert( 'click ok when the previous tx confirms' );
-                // var txid2 = await mempool_client( network.split( "," ), "broadcast", `${tapscript.Tx.encode( movement_tx ).hex},${tapscript.Tx.encode( fee_payment_tx ).hex}` );
-                // console.log( 'txid2:' );
-                // console.log( txid2 );
                 $( '.yes_balance' ).innerText = yes_balance;
                 $( '.no_balance' ).innerText = no_balance;
-                console.log( `your history: you deposited ${yes_balance} sats into Yes and ${no_balance} sats into No` );
             }
             var displayMarkets = async markets => {
                 markets.forEach( shareable_data => {
@@ -481,6 +636,155 @@
                 window.location.reload();
             }
             displayMarkets( markets );
+            if ( $_HASH.run_coordinator ) {
+                (async()=>{
+                    console.log( 'i am the coordinator!' );
+                    var listenFunction = async socket => {
+                        var subId = super_nostr.bytesToHex( crypto.getRandomValues( new Uint8Array( 8 ) ) );
+                        var filter  = {}
+                        filter.kinds = [ 4 ];
+                        filter[ "#p" ] = [ coordinators_pubkey ];
+                        filter.since = Math.floor( Date.now() / 1000 );
+                        var subscription = [ "REQ", subId, filter ];
+                        socket.send( JSON.stringify( subscription ) );
+                    }
+                    var handleFunction = async message => {
+                        var [ type, subId, event ] = JSON.parse( message.data );
+                        if ( !event || event === true ) return;
+                        var relay = coordinators_relays[ 0 ];
+                        var recipient = event.pubkey;
+                        var content = await super_nostr.alt_decrypt( coordinators_privkey, recipient, event.content );
+                        var json = JSON.parse( content );
+                        console.log( content );
+                        if ( json.msg_type === "ping" ) {
+                            var message = JSON.stringify({
+                                msg_type: "ping_reply",
+                                msg_value: "pong",
+                            });
+                            var emsg = await super_nostr.alt_encrypt( coordinators_privkey, recipient, message );
+                            var event = await super_nostr.prepEvent( coordinators_privkey, emsg, 4, [ [ "p", recipient ] ] );
+                            super_nostr.sendEvent( event, relay );
+                        }
+                        if ( json.msg_type === "get_offers" ) {
+                            var market_id = json.msg_value.market_id;
+                            var relevant_offers = [];
+                            Object.keys( offers ).forEach( offer_id => {
+                                if ( !offer_id.startsWith( market_id ) ) return;
+                                var offer = offers[ offer_id ];
+                                if ( json.msg_value.type === "for_sale_by_no_better" && !offer.odds_per_no_better ) return;
+                                if ( json.msg_value.type === "for_sale_by_yes_better" && !offer.odds_per_yes_better ) return;
+                                if ( json.msg_value.type === "for_sale_by_no_better" ) {
+                                    var price = offer.odds_per_no_better[ 0 ] * 100;
+                                    var psbt = offer.no_psbt;
+                                }
+                                if ( json.msg_value.type === "for_sale_by_yes_better" ) {
+                                    var price = offer.odds_per_yes_better[ 1 ] * 100;
+                                    var psbt = offer.yes_psbt;
+                                }
+                                if ( price > json.msg_value.max_price ) return;
+                                relevant_offers.push( [ offer_id, price, psbt ] );
+                            });
+                            var message = JSON.stringify({
+                                msg_type: "get_offers_reply",
+                                msg_value: relevant_offers,
+                            });
+                            var emsg = await super_nostr.alt_encrypt( coordinators_privkey, recipient, message );
+                            var event = await super_nostr.prepEvent( coordinators_privkey, emsg, 4, [ [ "p", recipient ] ] );
+                            super_nostr.sendEvent( event, relay );
+                        }
+                        if ( json.msg_type === "accept_offers" ) {
+                            //TODO: instead of taking a psbt from the user, have him tell you his inputs and the offers he is accepting, and then *recreate* the psbt
+                            var market_id = json.msg_value.market_id;
+                            var tx_to_work_with = json.msg_value.psbt;
+                            var offers_accepted = json.msg_value.offer_ids;
+                            //If the user found matching offers, act as the coordinator to add an input to his tx that funds his contracts and pays the requisite fees
+                            var sum_of_inputs = 0;
+                            tx_to_work_with.vin.forEach( input => sum_of_inputs = sum_of_inputs + Number( input.prevout.value ) );
+                            var sum_of_outputs = 0;
+                            tx_to_work_with.vout.forEach( output => sum_of_outputs = sum_of_outputs + Number( output.value ) );
+                            var difference = sum_of_outputs - sum_of_inputs;
+                            //create a fake input in that tx so you can calculate its size after accounting for the utxo you are about to add to it
+                            tx_to_work_with.vin.push({
+                                txid: "a".repeat( 64 ),
+                                vout: 0,
+                                witness: [ "a".repeat( 128 ) ],
+                            });
+                            //TODO: get feerate from the blockchain
+                            var feerate = 1;
+                            var size_of_psbt = tapscript.Tx.util.getTxSize( tapscript.Tx.create( tx_to_work_with ) ).vsize;
+                            var fee_needed = feerate * size_of_psbt;
+                            var total_needed = difference + fee_needed;
+                            var fee_privkey = super_nostr.getPrivkey();
+                            var fee_pubkey = super_nostr.getPubkey( fee_privkey );
+                            var fee_address = tapscript.Address.fromScriptPubKey( [ 1, fee_pubkey ], "testnet" );
+                            console.log( `send ${total_needed} sats to this address:` );
+                            console.log( fee_address );
+                            alert( `send ${total_needed} sats to the address in your console, then click ok` );
+                            var listenForCoins = async ( network, address ) => {
+                                console.log( `waiting for coordinator's deposit...` );
+                                await super_nostr.waitSomeSeconds( 1 );
+                                if ( !network ) network = prompt( "enter network, either in the form pubkey,wss://relay.example.com or a url such as https://mempool.guide/api" );
+                                if ( network.includes( "," ) ) network = network.split( "," );
+                                var utxos = await mempool_client( network, "utxos", address );
+                                if ( !utxos.length ) return listenForCoins( network, address );
+                                return utxos;
+                            }
+                            var utxos = await listenForCoins( network, fee_address );
+                            var fee_txid = utxos[ 0 ].txid;
+                            var fee_vout = utxos[ 0 ].vout;
+                            var fee_amnt = utxos[ 0 ].value;
+                            tx_to_work_with.vin.pop();
+                            tx_to_work_with.vin.push({
+                                txid: fee_txid,
+                                vout: fee_vout,
+                                prevout: {
+                                    value: fee_amnt,
+                                    scriptPubKey: tapscript.Address.toScriptPubKey( fee_address ),
+                                },
+                            });
+                            var sig = tapscript.Signer.taproot.sign( fee_privkey, tx_to_work_with, tx_to_work_with.vin.length - 1 ).hex;
+                            tx_to_work_with.vin[ tx_to_work_with.vin.length - 1 ].witness = [ sig ];
+                            console.log( 'now broadcasting this psbt:' );
+                            console.log( tapscript.Tx.encode( tx_to_work_with ).hex );
+                            var txid = await mempool_client( network.split( "," ), "broadcast", tapscript.Tx.encode( tx_to_work_with ).hex );
+                            var message = JSON.stringify({
+                                msg_type: "accept_offers_reply",
+                                msg_value: txid,
+                            });
+                            var emsg = await super_nostr.alt_encrypt( coordinators_privkey, recipient, message );
+                            var event = await super_nostr.prepEvent( coordinators_privkey, emsg, 4, [ [ "p", recipient ] ] );
+                            super_nostr.sendEvent( event, relay );
+
+                            offers_accepted.forEach( ( offer_id, index ) => {
+                                var funding_txid = tapscript.Tx.util.getTxid( tx_to_work_with );
+                                var funding_vout = tx_to_work_with.vout.length - ( index + 1 );
+                                if ( offers[ `${market_id}_${offer_id}` ].odds_per_yes_better ) {
+                                    var yes_better = offers[ `${market_id}_${offer_id}` ].yes_better;
+                                    var no_better = tapscript.Address.fromScriptPubKey( tx_to_work_with.vin[ offers_accepted.length ].prevout.scriptPubKey, "testnet" );
+                                    if ( !betters.hasOwnProperty( no_better ) ) betters[ no_better ] = [];
+                                    betters[ no_better ].push( `${market_id}_${offer_id}` );
+                                } else {
+                                    var yes_better = tapscript.Address.fromScriptPubKey( tx_to_work_with.vin[ offers_accepted.length ].prevout.scriptPubKey, "testnet" );
+                                    var no_better = offers[ `${market_id}_${offer_id}` ].no_better;
+                                    if ( !betters.hasOwnProperty( yes_better ) ) betters[ yes_better ] = [];
+                                    betters[ yes_better ].push( `${market_id}_${offer_id}` );
+                                }
+                                if ( offers[ `${market_id}_${offer_id}` ].odds_when_yes_better_entered ) var odds_when_yes_better_entered = offers[ `${market_id}_${offer_id}` ].odds_when_yes_better_entered;
+                                else var odds_when_yes_better_entered = offers[ `${market_id}_${offer_id}` ].odds_when_no_better_entered;
+                                if ( offers[ `${market_id}_${offer_id}` ].odds_when_no_better_entered ) var odds_when_no_better_entered = offers[ `${market_id}_${offer_id}` ].odds_when_no_better_entered;
+                                else var odds_when_no_better_entered = offers[ `${market_id}_${offer_id}` ].odds_when_yes_better_entered;
+                                offers[ `${market_id}_${offer_id}` ] = { offer_id, yes_psbt: null, no_psbt: null, odds_per_yes_better: null, odds_per_no_better: null, yes_better, no_better, odds_when_yes_better_entered, odds_when_no_better_entered, status: "active", funding_outpoint: `${funding_txid}_${funding_vout}` };
+                            });
+                        }
+                    }
+                    var connection_id = await super_nostr.newPermanentConnection( coordinators_relays[ 0 ], listenFunction, handleFunction );
+                    console.log( 'connected!', connection_id );
+                    console.log( 'users can talk to me at this pubkey:' );
+                    console.log( coordinators_pubkey );
+                    console.log( 'and this relay:' );
+                    console.log( coordinators_relays[ 0 ] );
+                })();
+            }
             var showPage = page => {
                 $$( '.top_level_page' ).forEach( page => page.classList.add( "hidden" ) );
                 $( `.${page}` ).classList.remove( "hidden" );
