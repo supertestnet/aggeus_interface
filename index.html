@@ -134,14 +134,14 @@
             <div class="yes_or_no_box yes_box">
                 <p class="bold">Bet on Yes</p>
                 <div class="yes_qr_code"></div>
-                <p>Current chance: <span class="current_chance">60%</span></p>
+                <p>Current chance: <span class="current_chance">loading...</span></p>
                 <p class="yes_up_or_down">Up</p>
                 <p><button class="users_yes_info_btn">Your "Yes" info</button></p>
                 <div class="users_yes_info hidden">
                     <p>Your deposits so far: <span class="yes_balance">0</span> sats</p>
-                    <p>Amount lost to mining fees: <span class="lost_to_fees">0</span> sats</p>
-                    <p>How many sats you can withdraw (i.e. amount not in active contracts): <span class="withdrawable_balance">0</span> sats</p>
-                    <p>Amount of sats in active contracts (and thus not withdrawable): <span class="unwithdrawable_balance">0</span> sats</p>
+                    <p>Amount of sats lost to mining fees: <span class="lost_to_fees">0</span> sats</p>
+                    <p>How many sats you can unilaterally withdraw (i.e. amount not in active contracts): <span class="withdrawable_balance">0</span> sats</p>
+                    <p>Amount of sats in active contracts (and thus not withdrawable til you sell your position or the market resolves): <span class="unwithdrawable_balance">0</span> sats</p>
                     <p>Balance you might get on resolution day if all your contracts get purchased and your side wins: <span class="expected_balance">0</span> sats</p>
                     <p>Amount you might earn right now if you list your position for sale and someone buys it: <span class="earnings_possible_now">0</span> sats</p>
                 </div>
@@ -149,14 +149,14 @@
             <div class="yes_or_no_box no_box">
                 <p class="bold">Bet on No</p>
                 <div class="no_qr_code"></div>
-                <p>Current chance: <span class="current_chance">40%</span></p>
+                <p>Current chance: <span class="current_chance">loading...</span></p>
                 <p class="no_up_or_down">Down</p>
                 <p><button class="users_no_info_btn">Your "No" info</button></p>
                 <div class="users_no_info hidden">
                     <p>Your deposits so far: <span class="no_balance">0</span> sats</p>
-                    <p>Amount lost to mining fees: <span class="lost_to_fees">0</span> sats</p>
-                    <p>How many sats you can withdraw (i.e. amount not in active contracts): <span class="withdrawable_balance">0</span> sats</p>
-                    <p>Amount of sats in active contracts (and thus not withdrawable): <span class="unwithdrawable_balance">0</span> sats</p>
+                    <p>Amount of sats lost to mining fees: <span class="lost_to_fees">0</span> sats</p>
+                    <p>How many sats you can unilaterally withdraw (i.e. amount not in active contracts): <span class="withdrawable_balance">0</span> sats</p>
+                    <p>Amount of sats in active contracts (and thus not withdrawable til you sell your position or the market resolves): <span class="unwithdrawable_balance">0</span> sats</p>
                     <p>Balance you might get on resolution day if all your contracts get purchased and your side wins: <span class="expected_balance">0</span> sats</p>
                     <p>Amount you might earn right now if you list your position for sale and someone buys it: <span class="earnings_possible_now">0</span> sats</p>
                 </div>
@@ -177,7 +177,24 @@
                     var address = tapscript.Address.p2tr.fromPubKey( tpubkey, aggeus_interface.mempool_network );
                     return [ address, tree, cblock ];
                 },
+                percentages: [ 60, 40 ],
+                loadChances: yes_percent => {
+                    if ( !yes_percent ) return console.log( 'you forgot to include a yes_percent' );
+                    prev_chances = JSON.parse( JSON.stringify( aggeus_interface.percentages ) );
+                    aggeus_interface.percentages = [ yes_percent, 100 - yes_percent ];
+                    if ( yes_percent < prev_chances[ 0 ] ) {
+                        $( '.yes_up_or_down' ).innerText = "Down";
+                        $( '.no_up_or_down' ).innerText = "Up";
+                    }
+                    if ( yes_percent > prev_chances[ 0 ] ) {
+                        $( '.yes_up_or_down' ).innerText = "Up";
+                        $( '.no_up_or_down' ).innerText = "Down";
+                    }
+                    $( '.yes_box .current_chance' ).innerText = `${yes_percent}%`;
+                    $( '.no_box .current_chance' ).innerText = `${100 - yes_percent}%`;
+                },
             }
+            aggeus_interface.loadChances( aggeus_interface.percentages[ 0 ] );
             var privkey = super_nostr.getPrivkey();
             if ( $_HASH.network ) var network = $_HASH.network;
             else var network = null;
@@ -191,7 +208,7 @@
                 var market_data = JSON.parse( atob( shareable_data ) );
                 var market_id = market_data[ 2 ];
 
-                //Get all matching offers from the coordinator
+                //Prepare to talk to the coordinator
                 showPage( 'loading_page' );
                 var c_talker = async ( miner, relay, command, params ) => {
                     var privkey = super_nostr.getPrivkey();
@@ -224,9 +241,12 @@
                     var reply = await loop();
                     return reply;
                 }
+
+                //Ensure there is a coordinator
                 var reply = await c_talker( aggeus_interface.coordinators_pubkey, aggeus_interface.coordinators_relays[ 0 ], "ping" );
                 if ( reply === "no_coordinator" ) return alert( `this market has no coordinator, try again` );
 
+                //Prepare requisite variables
                 var yes_privkey = await super_nostr.sha256( `y${privkey}${market_id}0` );
                 var no_privkey = await super_nostr.sha256( `n${privkey}${market_id}0` );
                 var yes_pubkey = super_nostr.getPubkey( yes_privkey );
@@ -236,6 +256,8 @@
                 $( '.yes_qr_code' ).innerText = yes_address;
                 $( '.no_qr_code' ).innerText = no_address;
                 showPage( 'market_page' );
+
+                //Listen for deposits
                 var listenForCoins = async network => {
                     console.log( `waiting for user's deposit...` );
                     await super_nostr.waitSomeSeconds( 1 );
@@ -263,7 +285,7 @@
                 var remaining_yes_balance = yes_balance;
                 var remaining_no_balance = no_balance;
                 if ( yes_balance ) {
-                    var all_offers = await c_talker( aggeus_interface.coordinators_pubkey, aggeus_interface.coordinators_relays[ 0 ], "get_offers", { market_id, type: "for_sale_by_no_better", max_price: ( 60 * 100 ) + ( 2 * 100 ) });
+                    var all_offers = await c_talker( aggeus_interface.coordinators_pubkey, aggeus_interface.coordinators_relays[ 0 ], "get_offers", { market_id, type: "for_sale_by_no_better", max_price: ( aggeus_interface.percentages[ 0 ] * 100 ) + ( 2 * 100 ) });
                     all_offers.forEach( offer => {
                         if ( offer[ 1 ] > remaining_yes_balance ) return;
                         matching_offers[ "buying_yes" ].push( offer );
@@ -271,7 +293,7 @@
                     });
                 }
                 if ( no_balance ) {
-                    var all_offers = await c_talker( aggeus_interface.coordinators_pubkey, aggeus_interface.coordinators_relays[ 0 ], "get_offers", { market_id, type: "for_sale_by_yes_better", max_price: ( 40 * 100 ) + ( 2 * 100 ) } );
+                    var all_offers = await c_talker( aggeus_interface.coordinators_pubkey, aggeus_interface.coordinators_relays[ 0 ], "get_offers", { market_id, type: "for_sale_by_yes_better", max_price: ( aggeus_interface.percentages[ 1 ] * 100 ) + ( 2 * 100 ) } );
                     all_offers.forEach( offer => {
                         if ( offer[ 1 ] > remaining_no_balance ) return;
                         matching_offers[ "buying_no" ].push( offer );
@@ -286,7 +308,7 @@
                     var tx = tapscript.Tx.decode( offer[ 2 ] );
                     var new_vin = tx.vin[ 0 ];
                     new_vin.prevout = {
-                        value: 10_000 - ( ( 60 * 100 ) - ( 2 * 100 ) ),
+                        value: 10_000 - ( ( aggeus_interface.percentages[ 0 ] * 100 ) - ( 2 * 100 ) ),
                         scriptPubKey: [ 1, "a".repeat( 64 ) ],
                     }
                     match_vin.push( new_vin );
@@ -296,7 +318,7 @@
                     var tx = tapscript.Tx.decode( offer[ 2 ] );
                     var new_vin = tx.vin[ 0 ];
                     new_vin.prevout = {
-                        value: 10_000 - ( ( 40 * 100 ) - ( 2 * 100 ) ),
+                        value: 10_000 - ( ( aggeus_interface.percentages[ 1 ] * 100 ) - ( 2 * 100 ) ),
                         scriptPubKey: [ 1, "a".repeat( 64 ) ],
                     }
                     match_vin.push( new_vin );
@@ -339,17 +361,17 @@
                         },
                     });
                 });
-                var num_of_yes_outputs_to_make = Math.floor( remaining_yes_balance / ( 10_000 - ( ( 40 * 100 ) - ( 2 * 100 ) ) ) );
-                var yes_change = remaining_yes_balance % ( 10_000 - ( ( 40 * 100 ) - ( 2 * 100 ) ) );
+                var num_of_yes_outputs_to_make = Math.floor( remaining_yes_balance / ( 10_000 - ( ( aggeus_interface.percentages[ 1 ] * 100 ) - ( 2 * 100 ) ) ) );
+                var yes_change = remaining_yes_balance % ( 10_000 - ( ( aggeus_interface.percentages[ 1 ] * 100 ) - ( 2 * 100 ) ) );
                 var i; for ( i=0; i<num_of_yes_outputs_to_make; i++ ) {
                     if ( matching_offers.buying_yes.length ) {
                         match_vout.push({
-                            value: ( 10_000 - ( ( 40 * 100 ) - ( 2 * 100 ) ) ),
+                            value: ( 10_000 - ( ( aggeus_interface.percentages[ 1 ] * 100 ) - ( 2 * 100 ) ) ),
                             scriptPubKey: tapscript.Address.toScriptPubKey( yes_address ),
                         });
                     } else {
                         yes_outputs.push({
-                            value: ( 10_000 - ( ( 40 * 100 ) - ( 2 * 100 ) ) ),
+                            value: ( 10_000 - ( ( aggeus_interface.percentages[ 1 ] * 100 ) - ( 2 * 100 ) ) ),
                             scriptPubKey: tapscript.Address.toScriptPubKey( yes_address ),
                         });
                     }
@@ -400,17 +422,17 @@
                         },
                     });
                 });
-                var num_of_no_outputs_to_make = Math.floor( remaining_no_balance / ( 10_000 - ( ( 60 * 100 ) - ( 2 * 100 ) ) ) );
-                var no_change = remaining_no_balance % ( 10_000 - ( ( 60 * 100 ) - ( 2 * 100 ) ) );
+                var num_of_no_outputs_to_make = Math.floor( remaining_no_balance / ( 10_000 - ( ( aggeus_interface.percentages[ 0 ] * 100 ) - ( 2 * 100 ) ) ) );
+                var no_change = remaining_no_balance % ( 10_000 - ( ( aggeus_interface.percentages[ 0 ] * 100 ) - ( 2 * 100 ) ) );
                 var i; for ( i=0; i<num_of_no_outputs_to_make; i++ ) {
                     if ( matching_offers.buying_no.length ) {
                         match_vout.push({
-                            value: ( 10_000 - ( ( 60 * 100 ) - ( 2 * 100 ) ) ),
+                            value: ( 10_000 - ( ( aggeus_interface.percentages[ 0 ] * 100 ) - ( 2 * 100 ) ) ),
                             scriptPubKey: tapscript.Address.toScriptPubKey( no_address ),
                         });
                     } else {
                         no_outputs.push({
-                            value: ( 10_000 - ( ( 60 * 100 ) - ( 2 * 100 ) ) ),
+                            value: ( 10_000 - ( ( aggeus_interface.percentages[ 0 ] * 100 ) - ( 2 * 100 ) ) ),
                             scriptPubKey: tapscript.Address.toScriptPubKey( no_address ),
                         });
                     }
@@ -446,6 +468,8 @@
                         no_psbt.vin[ i ].witness = [ sig ];
                     }
                 }
+
+                //If necessary, modify your transaction so that it pays mining fees
                 var subtractFeesFromOutputs = ( psbt, feerate ) => {
                     if ( !psbt.vout.length ) return 'error';
                     var size_of_psbt = tapscript.Tx.util.getTxSize( tapscript.Tx.create( psbt ) ).vsize;
@@ -496,7 +520,7 @@
                         [ "OP_RETURN", i ],
                     ];
                     var [ yes_contract ] = aggeus_interface.getAddressData( yes_scripts, 0 );
-                    coordinator_to_user_contracts.push( [ yes_contract, yes_scripts, "user_bets_yes", ( 60 * 100 ) - ( 2 * 100 ) ] );
+                    coordinator_to_user_contracts.push( [ yes_contract, yes_scripts, "user_bets_yes", ( aggeus_interface.percentages[ 0 ] * 100 ) - ( 2 * 100 ) ] );
                 }
                 var i; for ( i=0; i<vins_to_skip; i++ ) {
                     if ( !no_psbt_minus_fees.vout.length ) continue;
@@ -505,13 +529,12 @@
                         [ "OP_RETURN", i ],
                     ];
                     var [ no_contract ] = aggeus_interface.getAddressData( no_scripts, 0 );
-                    coordinator_to_user_contracts.push( [ no_contract, no_scripts, "user_bets_no", ( 40 * 100 ) - ( 2 * 100 ) ] );
+                    coordinator_to_user_contracts.push( [ no_contract, no_scripts, "user_bets_no", ( aggeus_interface.percentages[ 1 ] * 100 ) - ( 2 * 100 ) ] );
                 }
 
                 //Define the number of outputs controlled by the user; this variable will be used later, but it seems wise to define it here, before more outputs get added which the coordinator must fund, otherwise it's harder to calculate later
                 var num_of_user_controlled_outputs_except_change = yes_psbt_minus_fees.vout.length + no_psbt_minus_fees.vout.length - vins_to_skip;
                 if ( change_address_exists ) num_of_user_controlled_outputs_except_change = num_of_user_controlled_outputs_except_change - 1;
-                console.log( 'num_of_user_controlled_outputs_except_change:', num_of_user_controlled_outputs_except_change, yes_psbt_minus_fees, vins_to_skip );
 
                 //if necessary, add 10k sat outputs that fund the above-mentioned smart contracts between the coordinator and the new user, and which the coordinator must supply inputs for
                 if ( vins_to_skip ) {
@@ -532,7 +555,7 @@
                     var offer_id = super_nostr.getPrivkey().substring( 0, 16 );
                 }
 
-                //sign the modified transactions
+                //Sign the modified transactions
                 var i; for ( i=vins_to_skip; i<yes_psbt_minus_fees.vin.length; i++ ) {
                     var sig = tapscript.Signer.taproot.sign( yes_privkey, yes_psbt_minus_fees, i ).hex;
                     if ( vins_to_skip ) var sig = tapscript.Signer.taproot.sign( yes_privkey, yes_psbt_minus_fees, i, {sigflag: 1 | 128} ).hex;
@@ -540,12 +563,11 @@
                 }
                 var i; for ( i=vins_to_skip; i<no_psbt_minus_fees.vin.length; i++ ) {
                     var sig = tapscript.Signer.taproot.sign( no_privkey, no_psbt_minus_fees, i ).hex;
-                    //TODO: add a 10k sat output for each of these that funds a smart contract between the coordinator and the new user, and which the coordinator must supply inputs for
                     if ( vins_to_skip ) var sig = tapscript.Signer.taproot.sign( no_privkey, no_psbt_minus_fees, i, {sigflag: 1 | 128} ).hex;
                     no_psbt_minus_fees.vin[ i ].witness = [ sig ];
                 }
 
-                //Define the smart contracts by which the user enters into a Yes or No position
+                //Define the smart contracts by which the user enters into a Yes or No position using any funds not matched up with an existing offer
                 //Note that the Yes position used to be encoded as this address: tb1pgkykn7dqs4umtr3ggej3dekz2fa7ecjm8tzcns3fq6y508uf7dvsvhnswg
                 //And the No position used to be encoded as this address: tb1ppywlyhjxh35jxt3u47jdhj4gm55ewq654qr5qj8wtjfzjx9cjd0qurfgum
                 var num_of_yes_outputs_to_turn_info_offers = yes_psbt_minus_fees.vout.length;
@@ -559,7 +581,7 @@
                         [ "OP_RETURN", i ],
                     ];
                     var [ yes_contract ] = aggeus_interface.getAddressData( yes_scripts, 0 );
-                    yes_contracts.push( [ yes_contract, yes_scripts, "user_bets_yes", ( 10_000 - ( ( 60 * 100 ) - ( 2 * 100 ) ) ) ] );
+                    yes_contracts.push( [ yes_contract, yes_scripts, "user_bets_yes", ( 10_000 - ( ( aggeus_interface.percentages[ 0 ] * 100 ) - ( 2 * 100 ) ) ) ] );
                 }
                 var i; for ( i=0; i<num_of_user_controlled_outputs_except_change; i++ ) {
                     if ( !no_psbt_minus_fees.vout.length ) continue;
@@ -568,7 +590,7 @@
                         [ "OP_RETURN", i ],
                     ];
                     var [ no_contract ] = aggeus_interface.getAddressData( no_scripts, 0 );
-                    no_contracts.push( [ no_contract, no_scripts, "user_bets_no", ( 10_000 - ( ( 40 * 100 ) - ( 2 * 100 ) ) ) ] );
+                    no_contracts.push( [ no_contract, no_scripts, "user_bets_no", ( 10_000 - ( ( aggeus_interface.percentages[ 1 ] * 100 ) - ( 2 * 100 ) ) ) ] );
                 }
 
                 //For each of the user's outputs created by the above psbts, sign a tx that lets the coordinator turn them into offers
@@ -578,7 +600,7 @@
                     if ( !yes_psbt_minus_fees.vout.length ) continue;
                     var vout = yes_psbt_minus_fees.vout[ i ];
                     vout.value = Number( vout.value );
-                    if ( vout.value !== ( 10_000 - ( ( 40 * 100 ) - ( 2 * 100 ) ) ) ) continue;
+                    if ( vout.value !== ( 10_000 - ( ( aggeus_interface.percentages[ 1 ] * 100 ) - ( 2 * 100 ) ) ) ) continue;
                     var new_psbt = {
                         vin: [{
                             txid: yes_psbt_txid,
@@ -591,7 +613,7 @@
                             scriptPubKey: tapscript.Address.toScriptPubKey( yes_contracts[ i - vins_to_skip ][ 0 ] ),
                         }],
                     }
-                    new_yes_psbts.push( new_psbt );
+                    new_yes_psbts.push( [ new_psbt, i - vins_to_skip ] );
                 }
                 var no_psbt_txid = tapscript.Tx.util.getTxid( no_psbt_minus_fees );
                 var new_no_psbts = [];
@@ -599,7 +621,7 @@
                     if ( !no_psbt_minus_fees.vout.length ) continue;
                     var vout = no_psbt_minus_fees.vout[ i ];
                     vout.value = Number( vout.value );
-                    if ( vout.value !== ( 10_000 - ( ( 60 * 100 ) - ( 2 * 100 ) ) ) ) continue;
+                    if ( vout.value !== ( 10_000 - ( ( aggeus_interface.percentages[ 0 ] * 100 ) - ( 2 * 100 ) ) ) ) continue;
                     var new_psbt = {
                         vin: [{
                             txid: no_psbt_txid,
@@ -612,17 +634,7 @@
                             scriptPubKey: tapscript.Address.toScriptPubKey( no_contracts[ i - vins_to_skip ][ 0 ] ),
                         }],
                     }
-                    new_no_psbts.push( new_psbt );
-                }
-
-                //Sign the new psbts with sighash_single | anyone_can_pay i.e. 3 | 128
-                var i; for ( i=0; i<new_yes_psbts.length; i++ ) {
-                    var sig = tapscript.Signer.taproot.sign( yes_privkey, new_yes_psbts[ i ], 0, {sigflag: 3 | 128} ).hex;
-                    new_yes_psbts[ i ].vin[ 0 ].witness = [ sig ];
-                }
-                var i; for ( i=0; i<new_no_psbts.length; i++ ) {
-                    var sig = tapscript.Signer.taproot.sign( no_privkey, new_no_psbts[ i ], 0, {sigflag: 3 | 128} ).hex;
-                    new_no_psbts[ i ].vin[ 0 ].witness = [ sig ];
+                    new_no_psbts.push( [ new_psbt, i - vins_to_skip ] );
                 }
 
                 //Tell the coordinator about the matching offers and give him your psbt
@@ -632,55 +644,106 @@
                 tx_to_work_with.vout.forEach( ( vout, index ) => tx_to_work_with.vout[ index ].value = Number( vout.value ) );
                 var offer_ids = [];
                 matching_offers.buying_yes.forEach( ( yes_offer, index ) => {
-                    offer_ids.push( yes_offer[ 0 ].split( "_" )[ 0 ] );
+                    offer_ids.push( [ yes_offer[ 0 ].split( "_" )[ 0 ], index ] );
                 });
                 matching_offers.buying_no.forEach( ( no_offer, index ) => {
-                    offer_ids.push( no_offer[ 0 ].split( "_" )[ 0 ] );
+                    offer_ids.push( [ no_offer[ 0 ].split( "_" )[ 0 ], index ] );
                 });
-                if ( vins_to_skip ) var funding_txid = await c_talker( aggeus_interface.coordinators_pubkey, aggeus_interface.coordinators_relays[ 0 ], "accept_offers", { market_id, offer_ids, psbt: tx_to_work_with });
+                if ( vins_to_skip ) {
+                    c_talker( aggeus_interface.coordinators_pubkey, aggeus_interface.coordinators_relays[ 0 ], "accept_offers", { market_id, offer_ids, psbt: tx_to_work_with });
+                    var address_to_listen_for = tapscript.Address.fromScriptPubKey( tx_to_work_with.vout[ 0 ].scriptPubKey, aggeus_interface.mempool_network );
+                    var listenForCoins = async ( network, address ) => {
+                        console.log( `waiting for coordinator's deposit...` );
+                        await super_nostr.waitSomeSeconds( 1 );
+                        if ( !network ) network = prompt( "enter network, either in the form pubkey,wss://relay.example.com or a url such as https://mempool.guide/api" );
+                        if ( network.includes( "," ) ) network = network.split( "," );
+                        var utxos = await mempool_client( network, "utxos", address );
+                        if ( !utxos.length ) return listenForCoins( network, address );
+                        return utxos;
+                    }
+                    var utxos = await listenForCoins( network, address_to_listen_for );
+                    var old_txid = tapscript.Tx.util.getTxid( tx_to_work_with );
+                    var new_txid = utxos[ 0 ].txid;
+                    var funding_txid = new_txid;
+                }
 
-                //Tell the user what is happening now
+                //Tell the user about the broadcasted transaction
                 if ( vins_to_skip ) {
                     console.log( 'the coordinator broadcasted this tx:' );
                     console.log( funding_txid );
-                    console.log( 'now I will share my other offers, if any, with the coordinator' );
                 } else {
                     console.log( 'now I am broadcasting the funding tx:' );
                     console.log( tapscript.Tx.encode( tx_to_work_with ).hex );
                     var txid = await mempool_client( network.split( "," ), "broadcast", tapscript.Tx.encode( tx_to_work_with ).hex );
                     console.log( 'success!' );
                     console.log( txid );
-                    console.log( 'now I will share my offers with the coordinator' );
                 }
+
+                //Store any offers you matched against
                 var offers_already_sent = [];
                 matching_offers.buying_yes.forEach( ( yes_offer, index ) => {
                     var offer_id = yes_offer[ 0 ].split( "_" )[ 0 ];
                     var funding_vout = tx_to_work_with.vout.length - ( index + 1 );
-                    offers[ `${offer_id}_${market_id}` ] = { offer_id, market_id, yes_psbt: null, no_psbt: null, odds_per_yes_better: null, odds_per_no_better: null, yes_better: yes_address, no_better: null, odds_when_yes_better_entered: [ 60 - 2, 40 + 2 ], odds_when_no_better_entered: null, status: "active", funding_outpoint: `${funding_txid}_${funding_vout}` };
+                    offers[ `${offer_id}_${market_id}` ] = { offer_id, market_id, yes_psbt: null, no_psbt: null, odds_per_yes_better: null, odds_per_no_better: null, yes_better: yes_address, no_better: null, odds_when_yes_better_entered: [ aggeus_interface.percentages[ 0 ] - 2, aggeus_interface.percentages[ 1 ] + 2 ], odds_when_no_better_entered: null, status: "active", funding_outpoint: `${funding_txid}_${funding_vout}`, index_for_yes_better: index, index_for_no_better: null };
                     offers_already_sent.push( `${offer_id}_${market_id}` );
                 });
                 matching_offers.buying_no.forEach( ( no_offer, index ) => {
                     var offer_id = no_offer[ 0 ].split( "_" )[ 0 ];
                     var funding_vout = tx_to_work_with.vout.length - ( index + 1 );
-                    offers[ `${offer_id}_${market_id}` ] = { offer_id, market_id, yes_psbt: null, no_psbt: null, odds_per_yes_better: null, odds_per_no_better: null, yes_better: null, no_better: no_address, odds_when_yes_better_entered: null, odds_when_no_better_entered: [ 60 + 2, 40 - 2 ], status: "active", funding_outpoint: `${funding_txid}_${funding_vout}` };
+                    offers[ `${offer_id}_${market_id}` ] = { offer_id, market_id, yes_psbt: null, no_psbt: null, odds_per_yes_better: null, odds_per_no_better: null, yes_better: null, no_better: no_address, odds_when_yes_better_entered: null, odds_when_no_better_entered: [ aggeus_interface.percentages[ 0 ] + 2, aggeus_interface.percentages[ 1 ] - 2 ], status: "active", funding_outpoint: `${funding_txid}_${funding_vout}`, index_for_yes_better: null, index_for_no_better: index };
                     offers_already_sent.push( `${offer_id}_${market_id}` );
                 });
+
+                //Before storing the user's unmatched offers, sign them with sighash_single | anyone_can_pay i.e. 3 | 128
+                console.log( 18, new_yes_psbts.length, new_no_psbts.length );
+                var i; for ( i=0; i<new_yes_psbts.length; i++ ) {
+                    var index = new_yes_psbts[ i ][ 1 ];
+                    var yes_scripts = [
+                        [ yes_pubkey, "OP_CHECKSIGVERIFY", aggeus_interface.coordinators_pubkey, "OP_CHECKSIG" ],
+                        [ "OP_RETURN", index ],
+                    ];
+                    var [ yes_contract, yes_tree ] = aggeus_interface.getAddressData( yes_scripts, 0 );
+                    var sig = tapscript.Signer.taproot.sign( yes_privkey, new_yes_psbts[ i ][ 0 ], 0, {sigflag: 3 | 128, extension: yes_tree[ 0 ]} ).hex;
+                    console.log( `i am changing my sig! old psbt: ${JSON.stringify( new_yes_psbts[ i ][ 0 ].vin[ 0 ] )} -- new sig: ${sig}`, new_yes_psbts );
+                    new_yes_psbts[ i ][ 0 ].vin[ 0 ].witness = [ sig ];
+                }
+                var i; for ( i=0; i<new_no_psbts.length; i++ ) {
+                    var index = new_no_psbts[ i ][ 1 ];
+                    var no_scripts = [
+                        [ no_pubkey, "OP_CHECKSIGVERIFY", aggeus_interface.coordinators_pubkey, "OP_CHECKSIG" ],
+                        [ "OP_RETURN", index ],
+                    ];
+                    var [ no_contract, no_tree ] = aggeus_interface.getAddressData( no_scripts, 0 );
+                    var sig = tapscript.Signer.taproot.sign( no_privkey, new_no_psbts[ i ][ 0 ], 0, {sigflag: 3 | 128, extension: no_tree[ 0 ]} ).hex;
+                    console.log( `i am changing my sig! old psbt: ${JSON.stringify( new_no_psbts[ i ][ 0 ].vin[ 0 ] )} -- new sig: ${sig}`, new_no_psbts );
+                    new_no_psbts[ i ][ 0 ].vin[ 0 ].witness = [ sig ];
+                }
+
+                //Store the user's unmatched offers
                 if ( new_yes_psbts.length ) new_yes_psbts.forEach( psbt => {
-                    psbt = tapscript.Tx.encode( tapscript.Tx.create( psbt ) ).hex;
+                    var index = psbt[ 1 ];
+                    psbt = tapscript.Tx.encode( tapscript.Tx.create( psbt[ 0 ] ) ).hex;
                     var offer_id = super_nostr.getPrivkey().substring( 0, 16 );
-                    offers[ `${offer_id}_${market_id}` ] = { offer_id, market_id, yes_psbt: psbt, no_psbt: null, odds_per_yes_better: [ 60 + 2, 40 - 2 ], odds_per_no_better: null, yes_better: yes_address, no_better: null, odds_when_yes_better_entered: [ 60 + 2, 40 - 2 ], odds_when_no_better_entered: null, status: "pending", funding_outpoint: null };
+                    offers[ `${offer_id}_${market_id}` ] = { offer_id, market_id, yes_psbt: psbt, no_psbt: null, odds_per_yes_better: [ aggeus_interface.percentages[ 0 ] + 2, aggeus_interface.percentages[ 1 ] - 2 ], odds_per_no_better: null, yes_better: yes_address, no_better: null, odds_when_yes_better_entered: [ aggeus_interface.percentages[ 0 ] + 2, aggeus_interface.percentages[ 1 ] - 2 ], odds_when_no_better_entered: null, status: "pending", funding_outpoint: null, index_for_yes_better: index, index_for_no_better: null };
                 });
                 if ( new_no_psbts.length ) new_no_psbts.forEach( psbt => {
-                    psbt = tapscript.Tx.encode( tapscript.Tx.create( psbt ) ).hex;
+                    var index = psbt[ 1 ];
+                    psbt = tapscript.Tx.encode( tapscript.Tx.create( psbt[ 0 ] ) ).hex;
                     var offer_id = super_nostr.getPrivkey().substring( 0, 16 );
-                    offers[ `${offer_id}_${market_id}` ] = { offer_id, market_id, yes_psbt: null, no_psbt: psbt, odds_per_yes_better: null, odds_per_no_better: [ 60 - 2, 40 + 2 ], yes_better: null, no_better: no_address, odds_when_yes_better_entered: null, odds_when_no_better_entered: [ 60 - 2, 40 + 2 ], status: "pending", funding_outpoint: null };
+                    offers[ `${offer_id}_${market_id}` ] = { offer_id, market_id, yes_psbt: null, no_psbt: psbt, odds_per_yes_better: null, odds_per_no_better: [ aggeus_interface.percentages[ 0 ] - 2, aggeus_interface.percentages[ 1 ] + 2 ], yes_better: null, no_better: no_address, odds_when_yes_better_entered: null, odds_when_no_better_entered: [ aggeus_interface.percentages[ 0 ] - 2, aggeus_interface.percentages[ 1 ] + 2 ], status: "pending", funding_outpoint: null, index_for_yes_better: null, index_for_no_better: index };
                 });
+
+                //Tell the user which offers will be shared with the coordinator
+                if ( vins_to_skip ) console.log( 'now I will share my other offers, if any, with the coordinator' );
+                else console.log( 'now I will share my offers with the coordinator' );
                 var offers_to_send = {}
                 Object.keys( offers ).forEach( offer_id => {
                     if ( offers_already_sent.includes( offer_id ) ) return;
                     offers_to_send[ offer_id ] = offers[ offer_id ];
-                })
-                c_talker( aggeus_interface.coordinators_pubkey, aggeus_interface.coordinators_relays[ 0 ], "create_offers", offers_to_send );
+                });
+                if ( !vins_to_skip ) c_talker( aggeus_interface.coordinators_pubkey, aggeus_interface.coordinators_relays[ 0 ], "create_offers", offers_to_send );
+
+                //Update the user's visible state 
                 var sum_of_inputs = 0;
                 var sum_of_outputs = 0;
                 tx_to_work_with.vin.forEach( vin => sum_of_inputs = sum_of_inputs + Number( vin.prevout.value ) );
@@ -691,7 +754,9 @@
                 $( '.no_balance' ).innerText = no_balance;
                 $$( '.lost_to_fees' ).forEach( item => item.innerText = lost_to_fees );
                 $$( '.withdrawable_balance' ).forEach( item => item.innerText = yes_balance + no_balance - lost_to_fees );
-                console.log( `now I am waiting for money to enter these addresses:` );
+
+                //Wait for the user's smart contracts to be funded
+                console.log( `now I am waiting for money to enter these smart contracts:` );
                 var yes_addresses = [];
                 yes_contracts.forEach( ct => yes_addresses.push( [ ct[ 0 ], ct[ 3 ] ] ) );
                 var no_addresses = [];
@@ -710,7 +775,7 @@
                     var i; for ( i=0; i<addresses.length; i++ ) {
                         var address = addresses[ i ][ 0 ];
                         var utxos = await mempool_client( network, "utxos", address );
-                        if ( utxos.length ) results[ address ] = addresses[ i ][ 1 ];
+                        if ( utxos.length ) results[ address ] = { amount_paid: addresses[ i ][ 1 ], utxos };
                         if ( utxos.length && recheck && i ) {
                             recheck = false;
                             i=-1;
@@ -720,15 +785,109 @@
                     return results;
                 }
                 var results = await listenForCoins( network, [ ...yes_addresses, ...no_addresses, ...coordinator_to_user_addresses ] );
+
+                //Change the user's visible state  
                 var sum_of_immovable_funds = 0;
                 var active_contracts = [];
                 Object.keys( results ).forEach( result => {
-                    sum_of_immovable_funds = sum_of_immovable_funds + results[ result ];
-                    active_contracts.push( result );
+                    var address_info = results[ result ];
+                    sum_of_immovable_funds = sum_of_immovable_funds + address_info[ "amount_paid" ];
+                    active_contracts.push({ address: result, utxos: address_info[ "utxos" ] });
                 });
-                console.log( 'active_contracts:', active_contracts );
                 $$( '.unwithdrawable_balance' ).forEach( item => item.innerText = sum_of_immovable_funds );
                 $$( '.withdrawable_balance' ).forEach( item => item.innerText = Number( item.innerText ) -sum_of_immovable_funds );
+
+                //Change the status of the user's now-active contracts
+                console.log( 'active_contracts:', active_contracts );
+                active_contracts.forEach( contract => {
+                    var address = contract.address;
+                    if ( yes_psbt_minus_fees.vout.length ) {
+                        Object.keys( offers ).every( offer_id => {
+                            var offer = offers[ offer_id ];
+                            if ( !offer.yes_psbt ) return true;
+                            var tx = tapscript.Tx.decode( offer.yes_psbt );
+                            var spky = tx.vout[ 0 ].scriptPubKey;
+                            var address_to_test = tapscript.Address.fromScriptPubKey( spky, aggeus_interface.mempool_network );
+                            if ( address_to_test !== address ) return true;
+                            offers[ offer_id ][ "status" ] = "active";
+                        });
+                    } else {
+                        Object.keys( offers ).every( offer_id => {
+                            var offer = offers[ offer_id ];
+                            if ( !offer.no_psbt ) return true;
+                            var tx = tapscript.Tx.decode( offer.no_psbt );
+                            var spky = tx.vout[ 0 ].scriptPubKey;
+                            var address_to_test = tapscript.Address.fromScriptPubKey( spky, aggeus_interface.mempool_network );
+                            if ( address_to_test !== address ) return true;
+                            offers[ offer_id ][ "status" ] = "active";
+                        });
+                    }
+                });
+
+                //If the txid on the user's psbts changed, resign the psbts with sighash_single | anyone_can_pay i.e. 3 | 128
+                if ( new_txid !== old_txid ) {
+                    var i; for ( i=0; i<new_yes_psbts.length; i++ ) {
+                        var index = new_yes_psbts[ i ][ 1 ];
+                        var yes_scripts = [
+                            [ yes_pubkey, "OP_CHECKSIGVERIFY", aggeus_interface.coordinators_pubkey, "OP_CHECKSIG" ],
+                            [ "OP_RETURN", index ],
+                        ];
+                        var [ yes_contract, yes_tree ] = aggeus_interface.getAddressData( yes_scripts, 0 );
+                        new_yes_psbts[ i ][ 0 ].vin[ 0 ].txid = new_txid;
+                        var sig = tapscript.Signer.taproot.sign( yes_privkey, new_yes_psbts[ i ][ 0 ], 0, {sigflag: 3 | 128, extension: yes_tree[ 0 ]} ).hex;
+                        new_yes_psbts[ i ][ 0 ].vin[ 0 ].witness = [ sig ];
+                    }
+                    var i; for ( i=0; i<new_no_psbts.length; i++ ) {
+                        var index = new_no_psbts[ i ][ 1 ];
+                        var no_scripts = [
+                            [ no_pubkey, "OP_CHECKSIGVERIFY", aggeus_interface.coordinators_pubkey, "OP_CHECKSIG" ],
+                            [ "OP_RETURN", index ],
+                        ];
+                        var [ no_contract, no_tree ] = aggeus_interface.getAddressData( no_scripts, 0 );
+                        new_no_psbts[ i ][ 0 ].vin[ 0 ].txid = new_txid;
+                        var sig = tapscript.Signer.taproot.sign( no_privkey, new_no_psbts[ i ][ 0 ], 0, {sigflag: 3 | 128, extension: no_tree[ 0 ]} ).hex;
+                        new_no_psbts[ i ][ 0 ].vin[ 0 ].witness = [ sig ];
+                    }
+
+                    //Tell the coordinator which offers the user accepted
+                    Object.keys( offers ).every( offer_id => {
+                        if ( !yes_psbt_minus_fees.vout.length ) {
+                            if ( !offers[ offer_id ].no_psbt ) return true;
+                            var tx = tapscript.Tx.decode( offers[ offer_id ].no_psbt );
+                            if ( tx.vin[ 0 ].txid !== old_txid ) return true;
+                            var vout = tx.vin[ 0 ].vout;
+                            var relevant_psbt = null;
+                            new_yes_psbts.forEach( psbt => {
+                                if ( psbt[ 0 ].vin[ 0 ].txid === new_txid && psbt[ 0 ].vin[ 0 ].vout === vout ) relevant_psbt = psbt[ 0 ];
+                            });
+                            new_no_psbts.forEach( psbt => {
+                                if ( psbt[ 0 ].vin[ 0 ].txid === new_txid && psbt[ 0 ].vin[ 0 ].vout === vout ) relevant_psbt = psbt[ 0 ];
+                            });
+                            var psbt = tapscript.Tx.encode( tapscript.Tx.create( relevant_psbt ) ).hex;
+                            offers[ offer_id ].no_psbt = psbt;
+                        } else {
+                            if ( !offers[ offer_id ].yes_psbt ) return true;
+                            var tx = tapscript.Tx.decode( offers[ offer_id ].yes_psbt );
+                            if ( tx.vin[ 0 ].txid !== old_txid ) return true;
+                            var vout = tx.vin[ 0 ].vout;
+                            var relevant_psbt = null;
+                            new_yes_psbts.forEach( psbt => {
+                                if ( psbt.vin[ 0 ].txid === new_txid && psbt.vin[ 0 ].vout === vout ) relevant_psbt = psbt[ 0 ];
+                            });
+                            new_no_psbts.forEach( psbt => {
+                                if ( psbt.vin[ 0 ].txid === new_txid && psbt.vin[ 0 ].vout === vout ) relevant_psbt = psbt[ 0 ];
+                            });
+                            var psbt = tapscript.Tx.encode( tapscript.Tx.create( relevant_psbt ) ).hex;
+                            offers[ offer_id ].yes_psbt = psbt;                            
+                        }
+                    });
+                    var offers_to_send = {}
+                    Object.keys( offers ).forEach( offer_id => {
+                        if ( offers_already_sent.includes( offer_id ) ) return;
+                        offers_to_send[ offer_id ] = offers[ offer_id ];
+                    });
+                    c_talker( aggeus_interface.coordinators_pubkey, aggeus_interface.coordinators_relays[ 0 ], "create_offers", offers_to_send );
+                }
             }
             var displayMarkets = async markets => {
                 markets.forEach( shareable_data => {
@@ -896,6 +1055,9 @@
                             offers_accepted.forEach( ( offer_id, index ) => {
                                 var funding_txid = tapscript.Tx.util.getTxid( tx_to_work_with );
                                 var funding_vout = tx_to_work_with.vout.length - ( index + 1 );
+                                var num_for_op_return = offer_id[ 1 ];
+                                offer_id = offer_id[ 0 ];
+                                var modify_yes_index = false;
                                 if ( offers[ `${offer_id}_${market_id}` ].odds_per_yes_better ) {
                                     var yes_better = offers[ `${offer_id}_${market_id}` ].yes_better;
                                     var no_better = tapscript.Address.fromScriptPubKey( tx_to_work_with.vin[ offers_accepted.length ].prevout.scriptPubKey, aggeus_interface.mempool_network );
@@ -906,12 +1068,17 @@
                                     var no_better = offers[ `${offer_id}_${market_id}` ].no_better;
                                     if ( !betters.hasOwnProperty( yes_better ) ) betters[ yes_better ] = [];
                                     betters[ yes_better ].push( `${offer_id}_${market_id}` );
+                                    modify_yes_index = true;
                                 }
                                 if ( offers[ `${offer_id}_${market_id}` ].odds_when_yes_better_entered ) var odds_when_yes_better_entered = offers[ `${offer_id}_${market_id}` ].odds_when_yes_better_entered;
                                 else var odds_when_yes_better_entered = offers[ `${offer_id}_${market_id}` ].odds_when_no_better_entered;
                                 if ( offers[ `${offer_id}_${market_id}` ].odds_when_no_better_entered ) var odds_when_no_better_entered = offers[ `${offer_id}_${market_id}` ].odds_when_no_better_entered;
                                 else var odds_when_no_better_entered = offers[ `${offer_id}_${market_id}` ].odds_when_yes_better_entered;
-                                offers[ `${offer_id}_${market_id}` ] = { offer_id, market_id, yes_psbt: null, no_psbt: null, odds_per_yes_better: null, odds_per_no_better: null, yes_better, no_better, odds_when_yes_better_entered, odds_when_no_better_entered, status: "active", funding_outpoint: `${funding_txid}_${funding_vout}` };
+                                var index_for_yes_better = offers[ `${offer_id}_${market_id}` ].index_for_yes_better;
+                                var index_for_no_better = offers[ `${offer_id}_${market_id}` ].index_for_no_better;
+                                if ( modify_yes_index ) index_for_yes_better = num_for_op_return;
+                                else index_for_no_better = num_for_op_return;
+                                offers[ `${offer_id}_${market_id}` ] = { offer_id, market_id, yes_psbt: null, no_psbt: null, odds_per_yes_better: null, odds_per_no_better: null, yes_better, no_better, odds_when_yes_better_entered, odds_when_no_better_entered, status: "active", funding_outpoint: `${funding_txid}_${funding_vout}`, index_for_yes_better, index_for_no_better };
                             });
                         }
                     }
@@ -935,6 +1102,32 @@
                 if ( !$( `.users_no_info` ).classList.contains( "hidden" ) ) $( `.users_no_info` ).classList.add( "hidden" );
                 else $( `.users_no_info` ).classList.remove( "hidden" );
             }
+            /*
+            var offers_i_will_sell = [];
+            Object.keys( offers ).forEach( offer_id => {
+                if ( offers[ offer_id ].status === "active" ) offers_i_will_sell.push( offer_id );
+            });
+            var offer = offers[ offers_i_will_sell[ 0 ] ];
+            var user_is_yes_better = !!offer.yes_better;
+            if ( user_is_yes_better ) {
+                var index = offer.index_for_yes_better;
+                var users_pubkey = tapscript.Address.toScriptPubKey( offer.yes_better )[ 1 ];
+                var sc_scripts = [
+                    [ aggeus_interface.coordinators_pubkey, "OP_CHECKSIGVERIFY", users_pubkey, "OP_CHECKSIG" ],
+                    [ "OP_RETURN", index ],
+                ];
+                var [ sc_address, sc_tree ] = aggeus_interface.getAddressData( sc_scripts, 0 );
+            } else {
+                var index = offer.index_for_no_better;
+                var users_pubkey = tapscript.Address.toScriptPubKey( offer.no_better )[ 1 ];
+                var sc_scripts = [
+                    [ aggeus_interface.coordinators_pubkey, "OP_CHECKSIGVERIFY", users_pubkey, "OP_CHECKSIG" ],
+                    [ "OP_RETURN", index ],
+                ];
+                var [ sc_address, sc_tree ] = aggeus_interface.getAddressData( sc_scripts, 0 );
+            }
+            console.log( sc_address );
+            */
         </script>
     </body>
 </html>
